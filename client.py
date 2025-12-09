@@ -6,11 +6,55 @@ import base64
 
 run = True
 
-# rsa key generator
+def encrypt_and_sign(message, receiver_pub_key, sender_priv_key):
+    ciphertext = receiver_pub_key.encrypt(
+        message.encode(),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    signature = sender_priv_key.sign(
+        message.encode(),
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+    return base64.b64encode(ciphertext) + b"::" + base64.b64encode(signature)
+
+def decrypt_and_verify(package, receiver_priv_key, sender_pub_key):
+    ciphertext_b64, signature_b64 = package.split(b"::")
+    ciphertext = base64.b64decode(ciphertext_b64)
+    signature = base64.b64decode(signature_b64)
+    plaintext = receiver_priv_key.decrypt(
+        ciphertext,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    ).decode()
+    try:
+        sender_pub_key.verify(
+            signature,
+            plaintext.encode(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        verified = True
+    except:
+        verified = False
+    return plaintext, verified
+
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 
-#  public and private key for display
 private_pem = private_key.private_bytes(
     encoding=serialization.Encoding.PEM,
     format=serialization.PrivateFormat.TraditionalOpenSSL,
@@ -29,44 +73,28 @@ print("----------------------------------------------------------")
 
 server_public_key = None
 
-
 def receiveMsgFromServer(conn):
     global run, server_public_key
     while run:
         try:
-            data = conn.recv(4096)
+            data = conn.recv(8192)
             if not data:
                 continue
-
-            # server public key for display
             if server_public_key is None:
                 server_public_key = serialization.load_pem_public_key(data)
-                print("\nReceived server's public key:")
+                print("\nReceived server public key:")
                 print(data.decode())
                 conn.sendall(public_pem)
                 print("Sent client public key to server.")
                 continue
-
-            # showing encrypted message
-            print(f"\n[Encrypted message from server]: {base64.b64encode(data).decode()}")
-
-            # decrpytion 
-            decrypted_msg = private_key.decrypt(
-                data,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None
-                )
-            )
-            print(f"[Decrypted message]: {decrypted_msg.decode()}")
-
+            print(f"\n[Received package]: {data.decode()}")
+            plaintext, verified = decrypt_and_verify(data, private_key, server_public_key)
+            print(f"[Decrypted message]: {plaintext}")
+            print("[Signature verified]" if verified else "[Signature verification FAILED]")
         except Exception as e:
             print("Error receiving:", e)
             run = False
-
     conn.close()
-
 
 if __name__ == '__main__':
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -80,19 +108,11 @@ if __name__ == '__main__':
         try:
             msg = input("\nClient: ")
             if server_public_key:
-                encrypted_msg = server_public_key.encrypt(
-                    msg.encode(),
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                        algorithm=hashes.SHA256(),
-                        label=None
-                    )
-                )
-                print(f"[Encrypted message sent]: {base64.b64encode(encrypted_msg).decode()}")
-                print(f"[Plaintext message]: {msg}")
-                s.sendall(encrypted_msg)
+                package = encrypt_and_sign(msg, server_public_key, private_key)
+                print(f"[Sent package]: {package.decode()}")
+                s.sendall(package)
             else:
-                print("Waiting for server's public key")
+                print("Waiting for server public key...")
         except Exception as e:
             print("Error sending:", e)
             run = False
