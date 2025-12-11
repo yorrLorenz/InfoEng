@@ -5,8 +5,24 @@ from cryptography.hazmat.primitives import serialization, hashes
 import base64
 
 run = True
+DEBUG = False  # Set False to disable debug output
 
+def debug_print(*args):
+    if DEBUG:
+        print(*args)
+
+# ---------------- ENCRYPT + SIGN ----------------
 def encrypt_and_sign(message, receiver_pub_key, sender_priv_key):
+    debug_print("\n[DEBUG] --- Encrypting & Signing Message ---")
+    debug_print("[DEBUG] Plaintext:", message)
+
+    # Compute hash
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(message.encode())
+    message_hash = digest.finalize()
+    debug_print("[DEBUG] SHA-256 Hash of message:", message_hash.hex())
+
+    # Encrypt
     ciphertext = receiver_pub_key.encrypt(
         message.encode(),
         padding.OAEP(
@@ -15,20 +31,35 @@ def encrypt_and_sign(message, receiver_pub_key, sender_priv_key):
             label=None
         )
     )
+    debug_print("[DEBUG] Ciphertext (raw bytes):", ciphertext.hex())
+
+    # Sign
     signature = sender_priv_key.sign(
-        message.encode(),
+        message_hash,
         padding.PSS(
             mgf=padding.MGF1(hashes.SHA256()),
             salt_length=padding.PSS.MAX_LENGTH
         ),
         hashes.SHA256()
     )
-    return base64.b64encode(ciphertext) + b"::" + base64.b64encode(signature)
+    debug_print("[DEBUG] Signature (raw bytes):", signature.hex())
 
+    package = base64.b64encode(ciphertext) + b"::" + base64.b64encode(signature)
+    debug_print("[DEBUG] Outgoing Base64 Package:", package.decode())
+    debug_print("[DEBUG] --- Encryption & Signing DONE ---")
+
+    return package
+
+# ---------------- DECRYPT + VERIFY ----------------
 def decrypt_and_verify(package, receiver_priv_key, sender_pub_key):
+    debug_print("\n[DEBUG] --- Decrypting & Verifying Package ---")
     ciphertext_b64, signature_b64 = package.split(b"::")
     ciphertext = base64.b64decode(ciphertext_b64)
     signature = base64.b64decode(signature_b64)
+    debug_print("[DEBUG] Received Ciphertext (raw bytes):", ciphertext.hex())
+    debug_print("[DEBUG] Received Signature (raw bytes):", signature.hex())
+
+    # Decrypt
     plaintext = receiver_priv_key.decrypt(
         ciphertext,
         padding.OAEP(
@@ -37,10 +68,19 @@ def decrypt_and_verify(package, receiver_priv_key, sender_pub_key):
             label=None
         )
     ).decode()
+    debug_print("[DEBUG] Decrypted Plaintext:", plaintext)
+
+    # Compute hash
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(plaintext.encode())
+    message_hash = digest.finalize()
+    debug_print("[DEBUG] SHA-256 Hash of decrypted message:", message_hash.hex())
+
+    # Verify signature
     try:
         sender_pub_key.verify(
             signature,
-            plaintext.encode(),
+            message_hash,
             padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),
                 salt_length=padding.PSS.MAX_LENGTH
@@ -48,10 +88,15 @@ def decrypt_and_verify(package, receiver_priv_key, sender_pub_key):
             hashes.SHA256()
         )
         verified = True
+        debug_print("[DEBUG] Signature Verified Successfully")
     except:
         verified = False
+        debug_print("[DEBUG] Signature Verification FAILED")
+
+    debug_print("[DEBUG] --- Decrypt + Verify DONE ---")
     return plaintext, verified
 
+# ---------------- GENERATE KEYS ----------------
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 
@@ -66,13 +111,14 @@ public_pem = public_key.public_bytes(
     format=serialization.PublicFormat.SubjectPublicKeyInfo
 )
 
-print("\n-------------------- CLIENT RSA KEYS --------------------")
-print("[Client Private Key]:\n", private_pem)
-print("[Client Public Key]:\n", public_pem.decode())
-print("----------------------------------------------------------")
+debug_print("\n-------------------- CLIENT RSA KEYS --------------------")
+debug_print(private_pem)
+debug_print(public_pem.decode())
+debug_print("----------------------------------------------------------")
 
 server_public_key = None
 
+# ---------------- RECEIVING LOOP ----------------
 def receiveMsgFromServer(conn):
     global run, server_public_key
     while run:
@@ -80,41 +126,44 @@ def receiveMsgFromServer(conn):
             data = conn.recv(8192)
             if not data:
                 continue
+
             if server_public_key is None:
                 server_public_key = serialization.load_pem_public_key(data)
-                print("\nReceived server public key:")
-                print(data.decode())
+                debug_print("\nReceived server public key:")
+                debug_print(data.decode())
                 conn.sendall(public_pem)
-                print("Sent client public key to server.")
+                debug_print("Sent client public key to server.")
                 continue
-            print(f"\n[Received package]: {data.decode()}")
+
             plaintext, verified = decrypt_and_verify(data, private_key, server_public_key)
-            print(f"[Decrypted message]: {plaintext}")
-            print("[Signature verified]" if verified else "[Signature verification FAILED]")
+            print(f"\nServer says: {plaintext}")
+            if DEBUG:
+                print("[Signature Verified]" if verified else "[Signature FAILED]")
+
         except Exception as e:
-            print("Error receiving:", e)
+            debug_print("Error receiving:", e)
             run = False
     conn.close()
 
+# ---------------- MAIN ----------------
 if __name__ == '__main__':
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect(('127.0.0.1', 8000))
-    print("\nConnected to server.")
+    print("Connected to server.\n")
 
     rcv = Thread(target=receiveMsgFromServer, args=(s,))
     rcv.start()
 
     while run:
         try:
-            msg = input("\nClient: ")
+            msg = input("Client: ")
             if server_public_key:
                 package = encrypt_and_sign(msg, server_public_key, private_key)
-                print(f"[Sent package]: {package.decode()}")
                 s.sendall(package)
             else:
                 print("Waiting for server public key...")
         except Exception as e:
-            print("Error sending:", e)
+            debug_print("Error sending:", e)
             run = False
 
     s.close()
