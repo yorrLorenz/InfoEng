@@ -5,22 +5,22 @@ from cryptography.hazmat.primitives import serialization, hashes
 import base64
 
 run = True
-DEBUG = False  # Set False to disable debug output
+DEBUG = False
 
 def debug_print(*args):
     if DEBUG:
         print(*args)
 
-# ---------------- ENCRYPT + SIGN ----------------
+#  ENCRYPT + SIGN 
 def encrypt_and_sign(message, receiver_pub_key, sender_priv_key):
-    debug_print("\n[DEBUG] --- Encrypting & Signing Message ---")
-    debug_print("[DEBUG] Plaintext:", message)
+    debug_print("\n --- Encrypting & Signing Message ---")
+    debug_print(" Plaintext:", message)
 
     # Compute hash
     digest = hashes.Hash(hashes.SHA256())
     digest.update(message.encode())
     message_hash = digest.finalize()
-    debug_print("[DEBUG] SHA-256 Hash of message:", message_hash.hex())
+    debug_print(" SHA-256 Hash of message:", message_hash.hex())
 
     # Encrypt
     ciphertext = receiver_pub_key.encrypt(
@@ -31,7 +31,7 @@ def encrypt_and_sign(message, receiver_pub_key, sender_priv_key):
             label=None
         )
     )
-    debug_print("[DEBUG] Ciphertext (raw bytes):", ciphertext.hex())
+    debug_print(" Ciphertext (raw bytes):", ciphertext.hex())
 
     # Sign the hash
     signature = sender_priv_key.sign(
@@ -42,23 +42,23 @@ def encrypt_and_sign(message, receiver_pub_key, sender_priv_key):
         ),
         hashes.SHA256()
     )
-    debug_print("[DEBUG] Signature (raw bytes):", signature.hex())
+    debug_print(" Signature (raw bytes):", signature.hex())
 
     # Combine into package
     package = base64.b64encode(ciphertext) + b"::" + base64.b64encode(signature)
-    debug_print("[DEBUG] Outgoing Base64 Package:", package.decode())
-    debug_print("[DEBUG] --- Encryption & Signing DONE ---")
+    debug_print(" Outgoing Base64 Package:", package.decode())
+    debug_print(" --- Encryption & Signing DONE ---")
 
     return package
 
-# ---------------- DECRYPT + VERIFY ----------------
+#  DECRYPT + VERIFY 
 def decrypt_and_verify(package, receiver_priv_key, sender_pub_key):
-    debug_print("\n[DEBUG] --- Decrypting & Verifying Package ---")
+    debug_print("\n --- Decrypting & Verifying Package ---")
     ciphertext_b64, signature_b64 = package.split(b"::")
     ciphertext = base64.b64decode(ciphertext_b64)
     signature = base64.b64decode(signature_b64)
-    debug_print("[DEBUG] Received Ciphertext (raw bytes):", ciphertext.hex())
-    debug_print("[DEBUG] Received Signature (raw bytes):", signature.hex())
+    debug_print(" Received Ciphertext (raw bytes):", ciphertext.hex())
+    debug_print(" Received Signature (raw bytes):", signature.hex())
 
     # Decrypt
     plaintext = receiver_priv_key.decrypt(
@@ -69,13 +69,13 @@ def decrypt_and_verify(package, receiver_priv_key, sender_pub_key):
             label=None
         )
     ).decode()
-    debug_print("[DEBUG] Decrypted Plaintext:", plaintext)
+    debug_print(" Decrypted Plaintext:", plaintext)
 
     # Compute hash
     digest = hashes.Hash(hashes.SHA256())
     digest.update(plaintext.encode())
     message_hash = digest.finalize()
-    debug_print("[DEBUG] SHA-256 Hash of decrypted message:", message_hash.hex())
+    debug_print(" SHA-256 Hash of decrypted message:", message_hash.hex())
 
     # Verify signature
     try:
@@ -89,15 +89,15 @@ def decrypt_and_verify(package, receiver_priv_key, sender_pub_key):
             hashes.SHA256()
         )
         verified = True
-        debug_print("[DEBUG] Signature Verified Successfully")
+        debug_print(" Signature Verified Successfully")
     except:
         verified = False
-        debug_print("[DEBUG] Signature Verification FAILED")
+        debug_print(" Signature Verification FAILED")
 
-    debug_print("[DEBUG] --- Decrypt + Verify DONE ---")
+    debug_print(" --- Decrypt + Verify DONE ---")
     return plaintext, verified
 
-# ---------------- GENERATE KEYS ----------------
+#  GENERATE KEYS 
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 
@@ -112,14 +112,14 @@ public_pem = public_key.public_bytes(
     format=serialization.PublicFormat.SubjectPublicKeyInfo
 )
 
-debug_print("\n-------------------- SERVER RSA KEYS --------------------")
+debug_print("\n--- SERVER RSA KEYS ---")
 debug_print(private_pem)
 debug_print(public_pem.decode())
-debug_print("----------------------------------------------------------")
+debug_print("------")
 
 client_public_key = None
 
-# ---------------- RECEIVING LOOP ----------------
+#  RECEIVING LOOP 
 def receiveMsgFromClient(conn):
     global run, client_public_key
     while run:
@@ -144,7 +144,7 @@ def receiveMsgFromClient(conn):
             run = False
     conn.close()
 
-# ---------------- SENDING LOOP ----------------
+#  SENDING LOOP 
 def sendMessage(conn):
     global run, client_public_key
     while run:
@@ -159,7 +159,7 @@ def sendMessage(conn):
             debug_print("Error sending:", e)
             run = False
 
-# ---------------- SERVER LISTEN ----------------
+#  SERVER LISTEN 
 def listenConnection():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(('127.0.0.1', 8000))
@@ -169,7 +169,7 @@ def listenConnection():
     conn.sendall(public_pem)
     return conn, addr, s
 
-# ---------------- MAIN ----------------
+#  MAIN 
 if __name__ == '__main__':
     conn, addr, s = listenConnection()
 
